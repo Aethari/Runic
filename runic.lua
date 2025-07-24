@@ -12,14 +12,14 @@
 -- This logging mostly only exists for debugging - eventually I
 -- will change it to create a log at a certain absolute path and
 -- provide actual info
-local file = io.open("log.txt", "w+")
-file:close()
+local f = io.open("log.txt", "w+")
+f:close()
 
 local log = {}
 function log.write(msg)
-	file = io.open("log.txt", "a")
-	file:write(msg.."\n")
-	file:close()
+	f = io.open("log.txt", "a")
+	f:write(msg.."\n")
+	f:close()
 end
 
 -- == ANSI character handling ==================================
@@ -61,6 +61,7 @@ end
 
 -- == Terminal helper ==========================================
 local term = {}
+
 function term.get_size()
 	out = {w = 80, h = 24}
 
@@ -82,25 +83,59 @@ function term.get_size()
 	return out
 end
 
+function term.reset()
+	-- reset the cursor to a solid block
+	ansi.write("2 q")
+
+	-- move to the last line of the terminal
+	local size = term.get_size()
+	ansi.write(tostring(size.h+1)..";0H")
+end
+
 -- == File management ==========================================
 local file = {}
 
+function file.exists(path)
+	local f = io.open(path, "r")
+
+	if f ~= nil then
+		f:close()
+		return true
+	else
+		return false
+	end
+end
+
 function file.read(path)
 	local out = {}
-	local file = io.open(path, "r")
+	local f = io.open(path, "r")
 
-	if file then
+	if f then
 		local i = 1
-		for line in file:lines() do
+		for line in f:lines() do
 			out[i] = line
 			i = i + 1
 		end
 
+		f:close()
 		return out
 	else
 		return {}
 	end
 end
+
+function file.write(path, str)
+	local f = io.open(path, "w+")
+	f:write(str)
+	f:close()
+end
+
+-- == Mode management ==========================================
+-- 1 = edit
+-- 2 = nav
+-- 3 = command line
+-- 4 = file browser / buffer
+local mode = 1
 
 -- == Buffer management ========================================
 local buff = {}
@@ -137,15 +172,31 @@ function buff.draw()
 	ansi.write(tostring(buff.y - buff.offset + 1)..";"..tostring(buff.x+4).."H")
 end
 
+-- == Command buffer management ================================
+local cmd = {}
+
+cmd.history = {}
+cmd.history_index = 0
+
+cmd.x = 1
+
+function cmd.draw()
+	local size = term.get_size()
+
+	ansi.write(tostring(size.h+1)..";0H")
+	io.write(cmd.str)
+
+	ansi.write(tostring(size.h+1)..";"..tostring(cmd.x).."H")
+end
+
+-- parses the command in cmd.str and runs it, if it is valid
+function cmd.parse()
+	log.write("parsing command: "..cmd.str)
+	table.insert(cmd.history, cmd.str)
+end
+
 -- == Drawing helper ===========================================
 local draw = {}
-function draw.hline(x, y, size)
-	ansi.write(y..";"..x.."H")
-
-	for i = x, size do
-		io.write(" ")
-	end
-end
 
 function draw.str(x, y, text)
 	x = math.floor(x)
@@ -166,19 +217,89 @@ function draw.ui()
 	local size = term.get_size()
 
 	-- top line
-	draw.hline(0, 0, size.w)
 	draw.str((size.w/2) - (#buff.filename/2), 1, buff.filename)
 
 	local pos = "("..buff.x..":"..buff.y..")"
 	draw.str(size.w - #pos - 1, 1, pos)
 
 	-- bottom line
-	draw.hline(0, size.h, size.w)
 	draw.str(size.w - 47, size.h, "ctrl+r for command line | ctrl+o to open file")
 end
 
--- == Input (no, really?!?) ====================================
-local function input()
+-- == Core actions =============================================
+local core = {}
+
+function core.save_file()
+	local out = ""
+	for _, line in ipairs(buff.str) do
+		out = out..line.."\n"
+	end
+	file.write(buff.filename, out)
+end
+
+function core.buff_cursor_up()
+	if buff.y > 1 then
+		buff.y = buff.y - 1
+
+		if buff.x > #buff.str[buff.y] then
+			buff.x = #buff.str[buff.y]
+		end
+		if buff.x < 1 then buff.x = 1 end
+
+		local size = term.get_size()
+		if buff.y < buff.offset + 4 then
+			buff.offset = buff.offset - 1
+		end
+	end
+end
+
+function core.buff_cursor_down()
+	if buff.y < #buff.str then
+		buff.y = buff.y + 1
+
+		local size = term.get_size()
+		if buff.y - buff.offset >= size.h - 4 then
+			buff.offset = buff.offset + 1
+		end
+
+		if buff.x > #buff.str[buff.y] then
+			buff.x = #buff.str[buff.y]
+		end
+		if buff.x < 1 then buff.x = 1 end
+	end
+end
+
+function core.buff_cursor_right()
+	if buff.x < #buff.str[buff.y]+1 then
+		buff.x = buff.x + 1
+	elseif buff.y < #buff.str then
+		buff.y = buff.y + 1
+		buff.x = 1
+	end
+end
+
+function core.buff_cursor_left()
+	if buff.x > 1 then
+		buff.x = buff.x - 1
+	elseif buff.y > 1 then
+		buff.y = buff.y - 1
+		buff.x = #buff.str[buff.y] + 1
+	end
+end
+
+function core.open_cmd()
+	cmd.str = ""
+	cmd.x = 1
+	cmd.history_index = #cmd.history + 1
+	mode = 3
+end
+
+function core.close_cmd()
+	mode = 1
+end
+
+-- == Input ====================================================
+local function edit_input()
 	os.execute("stty raw")
 
 	local char = io.read(1)
@@ -222,6 +343,10 @@ local function input()
 
 		if char == "q" then
 			return false
+		elseif char == "s" then
+			core.save_file()
+		elseif char == "r" then
+			core.open_cmd()
 		-- enter
 		elseif char == "m" then
 			local line = buff.y
@@ -240,59 +365,123 @@ local function input()
 
 		-- up
 		if code == "A" then
-			if buff.y > 1 then
-				buff.y = buff.y - 1
+			core.buff_cursor_up()
+		-- down
+		elseif code == "B" then
+			core.buff_cursor_down()
+		-- right
+		elseif code == "C" then
+			core.buff_cursor_right()
+		-- left
+		elseif code == "D" then
+			core.buff_cursor_left()
+		-- home
+		elseif code == "1" then
+			buff.x = 1
+		-- end
+		elseif code == "4" then
+			buff.x = #buff.str[buff.y] + 1
 
-				if buff.x > #buff.str[buff.y] then
-					buff.x = #buff.str[buff.y]
-				end
-				if buff.x < 1 then buff.x = 1 end
+			-- if the line is empty, it sets buff.x to 0, this fixes it
+			if buff.x < 1 then buff.x = 1 end
+		end
+	end
 
-				local size = term.get_size()
-				if buff.y < buff.offset + 4 then
-					buff.offset = buff.offset - 1
+	return true
+end
+
+local function cmd_input()
+	os.execute("stty raw")
+
+	local char = io.read(1)
+	
+	os.execute("stty sane")
+
+	local char_code = string.byte(char)
+	local is_ctrl = false
+	local is_esc = false
+
+	-- control characters
+	if char_code >= 1 and char_code < 27 then
+		-- convert to relevant character
+		char = string.char(char_code + 64)
+		is_ctrl = true
+	elseif char_code == 27 then
+		io.read(1)
+		is_esc = true
+	-- backspace
+	elseif char_code == 8 or char_code == 127 then
+		if cmd.x > 1 then
+			cmd.str = cmd.str:sub(1, cmd.x - 2)..cmd.str:sub(cmd.x)
+			cmd.x = cmd.x - 1
+		end
+	-- insert characters
+	else
+		cmd.str = cmd.str:sub(1, cmd.x-1)..char..cmd.str:sub(cmd.x)
+		cmd.x = cmd.x + 1
+	end
+
+	if is_ctrl then
+		char = char:lower()
+
+		if char == "q" then
+			return false
+		elseif char == "r" then
+			core.close_cmd()
+		-- enter
+		elseif char == "m" then
+			cmd.parse()
+			core.close_cmd()
+		end
+	elseif is_esc then
+		local code = io.read(1)
+
+		-- up
+		if code == "A" then
+			if cmd.history_index > 1 then
+				cmd.history_index = cmd.history_index - 1
+				local buff = cmd.history[cmd.history_index]
+				if buff then
+					cmd.str = buff
+				else
+					cmd.history_index = cmd.history_index + 1
+					cmd.str = ""
 				end
 			end
 		-- down
 		elseif code == "B" then
-			if buff.y < #buff.str then
-				buff.y = buff.y + 1
-
-				local size = term.get_size()
-				if buff.y - buff.offset >= size.h - 4 then
-					buff.offset = buff.offset + 1
+			-- next cmd.history
+			if cmd.history_index < #cmd.history+1 then
+				cmd.history_index = cmd.history_index + 1
+				local buff = cmd.history[cmd.history_index]
+				if buff then
+					cmd.str = buff
+				else
+					cmd.history_index = cmd.history_index - 1
+					cmd.str = ""
 				end
-
-				if buff.x > #buff.str[buff.y] then
-					buff.x = #buff.str[buff.y]
-				end
-				if buff.x < 1 then buff.x = 1 end
 			end
 		-- right
 		elseif code == "C" then
-			if buff.x < #buff.str[buff.y] then
-				buff.x = buff.x + 1
-			elseif buff.y < #buff.str then
-				buff.y = buff.y + 1
-				buff.x = 1
+			-- cursor right
+			if cmd.x < #cmd.str+1 then
+				cmd.x = cmd.x + 1
 			end
 		-- left
 		elseif code == "D" then
-			if buff.x > 1 then
-				buff.x = buff.x - 1
-			elseif buff.y > 1 then
-				buff.y = buff.y - 1
-				buff.x = #buff.str[buff.y]
+			-- cursor left
+			if cmd.x > 1 then
+				cmd.x = cmd.x - 1
 			end
 		-- home
 		elseif code == "1" then
-			buff.x = 1
-		--end
+			cmd.x = 1
+		-- end
 		elseif code == "4" then
-			buff.x = #buff.str[buff.y]
+			cmd.x = #cmd.str + 1
 
-			-- if the line is empty, it set buff.x to 0, this fixes it
-			if buff.x < 1 then buff.x = 1 end
+			-- if the line is empty, it sets cmd.x to 0, this fixes it
+			if cmd.x < 1 then cmd.x = 1 end
 		end
 	end
 
@@ -304,36 +493,45 @@ local function main()
 	local running = true
 
 	ansi.write("2 q")
-	-- ansi.write("6 q")
+	ansi.write("6 q")
 
 	if arg[1] then
-		buff.str = file.read(arg[1])
-		buff.filename = arg[1]
+		if not file.exists(arg[1]) then
+			buff.str = {}
+			table.insert(buff.str, "")
+			buff.filename = arg[1]
+		else
+			buff.str = file.read(arg[1])
+			buff.filename = arg[1]
+		end
+
 	else
 		buff.str = {""}
 		buff.filename = "New file"
 	end
+
 
 	-- initial draw
 	draw.ui()
 	buff.draw()
 
 	while running do
-		running = input()
-		draw.ui()
-		buff.draw()
+		if mode == 1 then
+			draw.ui()
+			buff.draw()
+
+			running = edit_input()
+		elseif mode == 3 then
+			draw.ui()
+			buff.draw()
+			cmd.draw()
+
+			running = cmd_input()
+		end
 	end
 end
 
 main()
 
 -- == Post app exit ============================================
--- reset the colors to black and white
-ansi.write("0m")
-
--- reset the cursor to a solid block
-ansi.write("2 q")
-
--- move to the last line of the terminal
-local size = term.get_size()
-ansi.write(tostring(size.h+1)..";0H")
+term.reset()
