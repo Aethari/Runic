@@ -8,6 +8,16 @@
 -- not (I do plan on using this as a full time editor, so it
 -- will probably need maintanenced at some point).
 
+-- == Tables ===================================================
+local log = {}
+local ansi = {}
+local term = {}
+local file = {}
+local buff = {}
+local cmd = {}
+local draw = {}
+local core = {}
+
 -- == Logging ==================================================
 -- This logging mostly only exists for debugging - eventually I
 -- will change it to create a log at a certain absolute path and
@@ -15,7 +25,6 @@
 local f = io.open("log.txt", "w+")
 f:close()
 
-local log = {}
 function log.write(msg)
 	f = io.open("log.txt", "a")
 	f:write(msg.."\n")
@@ -23,7 +32,6 @@ function log.write(msg)
 end
 
 -- == ANSI character handling ==================================
-local ansi = {}
 function ansi.write(seq)
 	-- 27 is the escape character
 	io.write(string.char(27).."["..seq)
@@ -60,8 +68,6 @@ function ansi.parse()
 end
 
 -- == Terminal helper ==========================================
-local term = {}
-
 function term.get_size()
 	out = {w = 80, h = 24}
 
@@ -93,8 +99,6 @@ function term.reset()
 end
 
 -- == File management ==========================================
-local file = {}
-
 function file.exists(path)
 	local f = io.open(path, "r")
 
@@ -134,12 +138,10 @@ end
 -- 1 = edit
 -- 2 = nav
 -- 3 = command line
--- 4 = file browser / buffer
+-- 4 = file browser
 local mode = 1
 
 -- == Buffer management ========================================
-local buff = {}
-
 -- cursor pos
 buff.x = 1
 buff.y = 1
@@ -173,8 +175,6 @@ function buff.draw()
 end
 
 -- == Command buffer management ================================
-local cmd = {}
-
 cmd.history = {}
 cmd.history_index = 0
 
@@ -191,13 +191,41 @@ end
 
 -- parses the command in cmd.str and runs it, if it is valid
 function cmd.parse()
-	log.write("parsing command: "..cmd.str)
 	table.insert(cmd.history, cmd.str)
+	local first_word, second_word = string.match(cmd.str, "^(%w+) (.+)")
+
+	if cmd.str == "quit" or cmd.str == "exit" then
+		return false
+	elseif first_word == "save" then
+		if not second_word then
+			core.save_file()
+		else
+			buff.filename = second_word
+			core.save_file()
+		end
+	elseif first_word == "open" then
+		if not second_word then
+			log.write("open command recieved")
+		else
+			core.load_file(second_word)
+		end
+	elseif first_word == "mode" then
+		if second_word == "edit" then
+			mode = 1
+		elseif second_word == "nav" then
+			--mode = 2
+		elseif second_word == "browser" then
+			--mode = 4
+		end
+	elseif first_word == "line" then
+		if second_word then
+		end
+	end
+
+	return true
 end
 
 -- == Drawing helper ===========================================
-local draw = {}
-
 function draw.str(x, y, text)
 	x = math.floor(x)
 	y = math.floor(y)
@@ -223,18 +251,27 @@ function draw.ui()
 	draw.str(size.w - #pos - 1, 1, pos)
 
 	-- bottom line
-	draw.str(size.w - 47, size.h, "ctrl+r for command line | ctrl+o to open file")
+	draw.str(size.w - 71, size.h, "ctrl+r for command line | ctrl+o to open file | ctrl+p for file browser")
 end
 
 -- == Core actions =============================================
-local core = {}
-
 function core.save_file()
 	local out = ""
 	for _, line in ipairs(buff.str) do
 		out = out..line.."\n"
 	end
 	file.write(buff.filename, out)
+end
+
+function core.load_file(path)
+	buff.filename = path
+
+	if not file.exists(path) then
+		buff.str = {}
+		table.insert(buff.str, "")
+	else
+		buff.str = file.read(path)
+	end
 end
 
 function core.buff_cursor_up()
@@ -345,8 +382,16 @@ local function edit_input()
 			return false
 		elseif char == "s" then
 			core.save_file()
+		elseif char == "o" then
+			core.open_cmd()
+			cmd.str = "open "
+			cmd.x = 6
 		elseif char == "r" then
 			core.open_cmd()
+		elseif char == "l" then
+			core.open_cmd()
+			cmd.str = "line "
+			cmd.x = 6
 		-- enter
 		elseif char == "m" then
 			local line = buff.y
@@ -430,8 +475,9 @@ local function cmd_input()
 			core.close_cmd()
 		-- enter
 		elseif char == "m" then
-			cmd.parse()
+			local res = cmd.parse()
 			core.close_cmd()
+			return res
 		end
 	elseif is_esc then
 		local code = io.read(1)
