@@ -1,4 +1,5 @@
 # Runic - A minimalist text editor written in pure Lua
+See the [docs](docs/) directory for some documentation
 
 ## Todo
 #### Drawing
