@@ -210,11 +210,12 @@ function cmd.parse()
 			core.load_file(second_word)
 		end
 	elseif first_word == "mode" then
-		if second_word == "edit" then
+		if second_word == "edit" or second_word == "e" then
 			mode = 1
-		elseif second_word == "nav" then
-			--mode = 2
-		elseif second_word == "browser" then
+			ansi.write("6 q")
+		elseif second_word == "nav" or second_word == "n" then
+			core.enter_nav()
+		elseif second_word == "browser" or second_word == "b" then
 			--mode = 4
 		end
 	elseif first_word == "line" then
@@ -324,6 +325,16 @@ function core.buff_cursor_left()
 	end
 end
 
+function core.enter_nav()
+	mode = 2
+	ansi.write("2 q")
+end
+
+function core.exit_nav()
+	mode = 1
+	ansi.write("6 q")
+end
+
 function core.open_cmd()
 	cmd.str = ""
 	cmd.x = 1
@@ -392,6 +403,8 @@ local function edit_input()
 			core.open_cmd()
 			cmd.str = "line "
 			cmd.x = 6
+		elseif char == "j" then
+			core.enter_nav()
 		-- enter
 		elseif char == "m" then
 			local line = buff.y
@@ -430,6 +443,83 @@ local function edit_input()
 			-- if the line is empty, it sets buff.x to 0, this fixes it
 			if buff.x < 1 then buff.x = 1 end
 		end
+	end
+
+	return true
+end
+
+local function nav_input()
+	os.execute("stty raw")
+
+	local char = io.read(1)
+	
+	os.execute("stty sane")
+
+	local char_code = string.byte(char)
+	local is_ctrl = false
+	local is_esc = false
+
+	if char_code >= 1 and char_code < 27 then
+		-- convert to relevant character
+		char = string.char(char_code + 64)
+		is_ctrl = true
+	elseif char_code == 27 then
+		io.read(1)
+		is_esc = true
+	-- j
+	elseif char_code == 106 then
+		core.buff_cursor_down()
+	-- k
+	elseif char_code == 107 then
+		core.buff_cursor_up()
+	-- h
+	elseif char_code == 104 then
+		core.buff_cursor_left()
+	-- l
+	elseif char_code == 108 then
+		core.buff_cursor_right()
+	-- u
+	elseif char_code == 117 then
+		buff.x = 1
+	-- i
+	elseif char_code == 105 then
+		buff.x = #buff.str[buff.y]+1
+	-- a
+	elseif char_code == 97 then
+		core.exit_nav()
+	-- q
+	elseif char_code == 113 then
+		return false
+	else
+		char = string.char(char_code + 64)
+		char = char:lower()
+
+		if char == "j" then
+			core.buff_cursor_down()
+		end
+	end
+
+	if is_ctrl then
+		char = char:lower()
+
+		if char == "q" then
+			return false
+		elseif char == "s" then
+			core.save_file()
+		elseif char == "o" then
+			core.open_cmd()
+			cmd.str = "open "
+			cmd.x = 6
+		elseif char == "r" then
+			core.open_cmd()
+		elseif char == "l" then
+			core.open_cmd()
+			cmd.str = "line "
+			cmd.x = 6
+		elseif char == "j" then
+			core.exit_nav()
+		end
+	elseif is_esc then
 	end
 
 	return true
@@ -476,7 +566,6 @@ local function cmd_input()
 		-- enter
 		elseif char == "m" then
 			local res = cmd.parse()
-			core.close_cmd()
 			return res
 		end
 	elseif is_esc then
@@ -538,7 +627,6 @@ end
 local function main()
 	local running = true
 
-	ansi.write("2 q")
 	ansi.write("6 q")
 
 	if arg[1] then
@@ -567,6 +655,11 @@ local function main()
 			buff.draw()
 
 			running = edit_input()
+		elseif mode == 2 then
+			draw.ui()
+			buff.draw()
+
+			running = nav_input()
 		elseif mode == 3 then
 			draw.ui()
 			buff.draw()

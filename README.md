@@ -5,11 +5,17 @@ See the [docs](docs/) directory for some documentation
 #### Drawing
 - instead of using tabstops, print 4 spaces when a tab characer
   is found
+- stop flickering / other drawing "artifacts" - make drawing
+  smoother
 
 #### Input
 - find a way to listen for esc key presses separate from other
   esc sequences
 - undo/redo
+- find/replace
+- cut/copy/paste (start by implementing basic line removal - 
+  nothing to do with the clipboard yet)
+- highlighting/selection
 
 #### Commands
 - make a list of available commands
@@ -18,10 +24,7 @@ See the [docs](docs/) directory for some documentation
 
 #### File management
 - implement file finder (separate buffer? command line stuff?
-  idk) 
-
-#### Other
-- implement different modes (edit and nav modes)
+  idk)
 
 ## Known bugs
 #### Rendering/drawing
