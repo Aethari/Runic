@@ -53,7 +53,11 @@ function ansi.parse()
 		seq = seq..char
 	until char == "R"
 
-	if seq:match("^%d+;%d+R") then
+	-- two match statements because i'm lazy
+	-- for some reason, on some of the position calls that
+	-- term.get_size sends, there is an extra brace ([) ahead
+	-- of the returned value
+	if seq:match("^%d+;%d+R") or seq:match("^%[%d+;%d+R") then
 		out.type = "position"
 
 		local colon_pos = seq:find(";")
@@ -142,7 +146,7 @@ end
 local mode = 1
 
 -- == Buffer management ========================================
--- cursor pos
+-- cursor pos (in the file, not on screen)
 buff.x = 1
 buff.y = 1
 
@@ -162,6 +166,7 @@ function buff.draw()
 	for i = 1, size.h - 2 do
 		local index = i + buff.offset
 		local line = buff.str[index]
+		line = line:gsub("\t", "    ")
 
 		if line then
 			ansi.write(tostring(i+1)..";0H")
@@ -219,7 +224,14 @@ function cmd.parse()
 			--mode = 4
 		end
 	elseif first_word == "line" then
-		if second_word then
+		if second_word and tonumber(second_word) then
+			local line = tonumber(second_word)
+
+			if line ~= buff.y + buff.offset then
+				buff.offset = line - 4
+			end
+
+			buff.y = line
 		end
 	end
 
@@ -246,6 +258,16 @@ function draw.ui()
 	local size = term.get_size()
 
 	-- top line
+	if mode == 1 then
+		draw.str(5, 0, "EDIT")
+	elseif mode == 2 then
+		draw.str(5, 0, "NAV")
+	elseif mode == 3 then
+		draw.str(5, 0, "CMD")
+	elseif mode == 4 then
+		draw.str(5, 0, "BROWSER")
+	end
+
 	draw.str((size.w/2) - (#buff.filename/2), 1, buff.filename)
 
 	local pos = "("..buff.x..":"..buff.y..")"
@@ -344,6 +366,13 @@ end
 
 function core.close_cmd()
 	mode = 1
+	ansi.write("6 q")
+end
+
+function core.undo()
+end
+
+function core.redo()
 end
 
 -- == Input ====================================================
@@ -566,6 +595,7 @@ local function cmd_input()
 		-- enter
 		elseif char == "m" then
 			local res = cmd.parse()
+			core.exit_nav()
 			return res
 		end
 	elseif is_esc then
