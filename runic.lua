@@ -166,9 +166,9 @@ function buff.draw()
 	for i = 1, size.h - 2 do
 		local index = i + buff.offset
 		local line = buff.str[index]
-		line = line:gsub("\t", "    ")
 
 		if line then
+			line = line:gsub("\t", "    ")
 			ansi.write(tostring(i+1)..";0H")
 			io.write(string.format("%3d", index))
 			io.write(" "..line.."\n")
@@ -199,7 +199,7 @@ function cmd.parse()
 	table.insert(cmd.history, cmd.str)
 	local first_word, second_word = string.match(cmd.str, "^(%w+) (.+)")
 
-	if cmd.str == "quit" or cmd.str == "exit" then
+	if cmd.str == "quit" or cmd.str == "exit" or cmd.str == "q" then
 		return false
 	elseif first_word == "save" then
 		if not second_word then
@@ -297,12 +297,16 @@ function core.load_file(path)
 	end
 end
 
+-- when calculating cursor position, gsub the tabs for spaces
 function core.buff_cursor_up()
 	if buff.y > 1 then
 		buff.y = buff.y - 1
 
-		if buff.x > #buff.str[buff.y] then
-			buff.x = #buff.str[buff.y]
+		local line = buff.str[buff.y]
+		if line then line = line:gsub("\t", "    ") end
+
+		if buff.x > #line then
+			buff.x = #line + 1
 		end
 		if buff.x < 1 then buff.x = 1 end
 
@@ -322,15 +326,21 @@ function core.buff_cursor_down()
 			buff.offset = buff.offset + 1
 		end
 
-		if buff.x > #buff.str[buff.y] then
-			buff.x = #buff.str[buff.y]
+		local line = buff.str[buff.y]
+		if line then line = line:gsub("\t", "    ") end
+
+		if buff.x > #line then
+			buff.x = #line + 1
 		end
 		if buff.x < 1 then buff.x = 1 end
 	end
 end
 
 function core.buff_cursor_right()
-	if buff.x < #buff.str[buff.y]+1 then
+	local line = buff.str[buff.y]
+	if line then line = line:gsub("\t", "    ") end
+
+	if buff.x < #line+1 then
 		buff.x = buff.x + 1
 	elseif buff.y < #buff.str then
 		buff.y = buff.y + 1
@@ -339,11 +349,14 @@ function core.buff_cursor_right()
 end
 
 function core.buff_cursor_left()
+	local line = buff.str[buff.y]
+	if line then line = line:gsub("\t", "    ") end
+
 	if buff.x > 1 then
 		buff.x = buff.x - 1
 	elseif buff.y > 1 then
 		buff.y = buff.y - 1
-		buff.x = #buff.str[buff.y] + 1
+		buff.x = #buff.str[buff.y]:gsub("\t", "    ") + 1
 	end
 end
 
@@ -467,7 +480,7 @@ local function edit_input()
 			buff.x = 1
 		-- end
 		elseif code == "4" then
-			buff.x = #buff.str[buff.y] + 1
+			buff.x = #buff.str[buff.y]:gsub("\t", "    ") + 1
 
 			-- if the line is empty, it sets buff.x to 0, this fixes it
 			if buff.x < 1 then buff.x = 1 end
@@ -512,7 +525,7 @@ local function nav_input()
 		buff.x = 1
 	-- i
 	elseif char_code == 105 then
-		buff.x = #buff.str[buff.y]+1
+		buff.x = #buff.str[buff.y]:gsub("\t", "    ") + 1
 	-- a
 	elseif char_code == 97 then
 		core.exit_nav()
@@ -595,7 +608,7 @@ local function cmd_input()
 		-- enter
 		elseif char == "m" then
 			local res = cmd.parse()
-			core.exit_nav()
+			core.close_cmd()
 			return res
 		end
 	elseif is_esc then
