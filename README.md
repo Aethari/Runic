@@ -7,14 +7,6 @@ See the [doc](doc/) directory for some (very simple)
 documentation
 
 ## Todo
-#### Drawing
-- stop flickering / other drawing "artifacts" - make drawing
-  smoother
-- draw an asterisk (*) after the filename if the file has
-  changes that have not been saved (use a state boolean, like a
-  "saved" var or something that is set to false when a character
-  is inserted, and set to true when the file is saved)
-
 #### Input
 - find a way to listen for esc key presses separate from other
   esc sequences - right now it just crashes the program
@@ -33,9 +25,8 @@ documentation
   idk)
 
 ## Known bugs
-#### Rendering/drawing
-- "artifacting" of sorts occurs when spamming inputs (reproduce
-  by opening file and rapid-fire type a bunch of chars)
+#### Input (general)
+- Pressing the escape key at all crashes the program
 
 #### Command input
 - After navigating down through more recent commands and

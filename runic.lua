@@ -18,6 +18,9 @@ local cmd = {}
 local draw = {}
 local core = {}
 
+-- defined draw.buff up here to avoid errors
+draw.buff = {}
+
 -- == Logging ==================================================
 -- This logging mostly only exists for debugging - eventually I
 -- will change it to create a log at a certain absolute path and
@@ -34,7 +37,7 @@ end
 -- == ANSI character handling ==================================
 function ansi.write(seq)
 	-- 27 is the escape character
-	io.write(string.char(27).."["..seq)
+	table.insert(draw.buff, string.char(27).."["..seq)
 end
 
 function ansi.parse()
@@ -76,10 +79,10 @@ function term.get_size()
 	out = {w = 80, h = 24}
 
 	-- move the cursor to the farthest bounds
-	ansi.write("999;999H")
+	io.write(string.char(27).."[999;999H")
 
 	-- get the cursor position
-	ansi.write("6n")
+	io.write(string.char(27).."[6n")
 	local pos = ansi.parse()
 
 	if(pos.type == "position") then
@@ -88,18 +91,24 @@ function term.get_size()
 	end
 
 	-- move the cursor back to (0,0)
-	ansi.write("H")
+	io.write(string.char(27).."[H")
 	
 	return out
 end
 
+-- yes, I know its a little backwards, defining a function only
+-- to be cached once, but it was a quick fix that can easily be
+-- claned up later
+term.size = term.get_size()
+
 function term.reset()
 	-- reset the cursor to a solid block
-	ansi.write("2 q")
+	io.write(string.char(27).."[2 q")
 
 	-- move to the last line of the terminal
-	local size = term.get_size()
+	local size = term.size
 	ansi.write(tostring(size.h+1)..";0H")
+	io.write(string.char(27).."["..tostring(size.h+1)..";0H")
 end
 
 -- == File management ==========================================
@@ -153,12 +162,15 @@ buff.y = 1
 -- offset (for scrolling)
 buff.offset = 0
 
+-- saved tracker
+buff.saved = true
+
 function buff.count_lines()
 	return #buff.str + 1
 end
 
 function buff.draw()
-	local size = term.get_size()
+	local size = term.size
 
 	if buff.offset <= 0 then buff.offset = 0 end
 
@@ -170,8 +182,8 @@ function buff.draw()
 		if line then
 			line = line:gsub("\t", "    ")
 			ansi.write(tostring(i+1)..";0H")
-			io.write(string.format("%3d", index))
-			io.write(" "..line.."\n")
+			table.insert(draw.buff, string.format("%3d", index))
+			table.insert(draw.buff, " "..line)
 		end
 	end
 
@@ -186,10 +198,10 @@ cmd.history_index = 0
 cmd.x = 1
 
 function cmd.draw()
-	local size = term.get_size()
+	local size = term.size
 
 	ansi.write(tostring(size.h+1)..";0H")
-	io.write(cmd.str)
+	table.insert(draw.buff, cmd.str)
 
 	ansi.write(tostring(size.h+1)..";"..tostring(cmd.x).."H")
 end
@@ -217,7 +229,7 @@ function cmd.parse()
 	elseif first_word == "mode" then
 		if second_word == "edit" or second_word == "e" then
 			mode = 1
-			ansi.write("6 q")
+			io.write(string.char(27).."[6 q")
 		elseif second_word == "nav" or second_word == "n" then
 			core.enter_nav()
 		elseif second_word == "browser" or second_word == "b" then
@@ -238,13 +250,13 @@ function cmd.parse()
 	return true
 end
 
--- == Drawing helper ===========================================
+-- == Drawing helper ==========================================
 function draw.str(x, y, text)
 	x = math.floor(x)
 	y = math.floor(y)
 
 	ansi.write(y..";"..x.."H")
-	io.write(text)
+	table.insert(draw.buff, text);
 end
 
 function draw.ui()
@@ -255,7 +267,7 @@ function draw.ui()
 	ansi.write("H")
 
 	-- get the terminal size
-	local size = term.get_size()
+	local size = term.size
 
 	-- top line
 	if mode == 1 then
@@ -269,6 +281,7 @@ function draw.ui()
 	end
 
 	draw.str((size.w/2) - (#buff.filename/2), 1, buff.filename)
+	if not buff.saved then draw.str((size.w/2) - (#buff.filename/2) + #buff.filename, 1, "*") end
 
 	local pos = "("..buff.x..":"..buff.y..")"
 	draw.str(size.w - #pos - 1, 1, pos)
@@ -284,6 +297,7 @@ function core.save_file()
 		out = out..line.."\n"
 	end
 	file.write(buff.filename, out)
+	buff.saved = true
 end
 
 function core.load_file(path)
@@ -310,7 +324,7 @@ function core.buff_cursor_up()
 		end
 		if buff.x < 1 then buff.x = 1 end
 
-		local size = term.get_size()
+		local size = term.size
 		if buff.y < buff.offset + 4 then
 			buff.offset = buff.offset - 1
 		end
@@ -321,7 +335,7 @@ function core.buff_cursor_down()
 	if buff.y < #buff.str then
 		buff.y = buff.y + 1
 
-		local size = term.get_size()
+		local size = term.size
 		if buff.y - buff.offset >= size.h - 4 then
 			buff.offset = buff.offset + 1
 		end
@@ -362,12 +376,12 @@ end
 
 function core.enter_nav()
 	mode = 2
-	ansi.write("2 q")
+	io.write(string.char(27).."[2 q")
 end
 
 function core.exit_nav()
 	mode = 1
-	ansi.write("6 q")
+	io.write(string.char(27).."[6 q")
 end
 
 function core.open_cmd()
@@ -379,7 +393,7 @@ end
 
 function core.close_cmd()
 	mode = 1
-	ansi.write("6 q")
+	io.write(string.char(27).."[6 q")
 end
 
 function core.undo()
@@ -426,6 +440,7 @@ local function edit_input()
 		local line = buff.y
 		buff.str[line] = buff.str[line]:sub(1, buff.x-1)..char..buff.str[line]:sub(buff.x)
 		buff.x = buff.x + 1
+		buff.saved = false
 	end
 
 	if is_ctrl then
@@ -670,7 +685,7 @@ end
 local function main()
 	local running = true
 
-	ansi.write("6 q")
+	io.write(string.char(27).."[6 q]")
 
 	if arg[1] then
 		if not file.exists(arg[1]) then
@@ -687,26 +702,44 @@ local function main()
 		buff.filename = "New file"
 	end
 
-
 	-- initial draw
 	draw.ui()
 	buff.draw()
 
 	while running do
 		if mode == 1 then
+			draw.buff = {}
+
 			draw.ui()
 			buff.draw()
+
+			local out = table.concat(draw.buff)
+			io.write(string.char(27).."[H"..out)
+			io.flush()
+			draw.buff = {}
 
 			running = edit_input()
 		elseif mode == 2 then
+			draw.buff = {}
+
 			draw.ui()
 			buff.draw()
 
+			local out = table.concat(draw.buff)
+			io.write(string.char(27).."[H"..out)
+			io.flush()
+
 			running = nav_input()
 		elseif mode == 3 then
+			draw.buff = {}
+
 			draw.ui()
 			buff.draw()
 			cmd.draw()
+
+			local out = table.concat(draw.buff)
+			io.write(string.char(27).."[H"..out)
+			io.flush()
 
 			running = cmd_input()
 		end
