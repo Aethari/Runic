@@ -1,1 +1,5 @@
+*.swp
 log.txt
+
+# syncthing stuff
+.stfolder

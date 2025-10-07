@@ -8,6 +8,18 @@
 -- not (I do plan on using this as a full time editor, so it
 -- will probably need maintanenced at some point).
 
+-- Current objective / fix / feature:
+-- 	implementing copy/paste (speficially pasting - line 433, core.paste() function)
+
+-- TODO: implement horizontal scrolling or line wrapping for long lines
+-- TODO: find a way to listen for the escape key - fixes below bug
+-- TODO: find / replace
+-- TODO: highlighting / selection (and fix any copying / pasting that comes with it)
+
+-- BUG: pressing the escape key crashes the editor
+
+-- =================== TODO section end ========================
+
 -- == Tables ===================================================
 local log = {}
 local ansi = {}
@@ -22,9 +34,7 @@ local core = {}
 draw.buff = {}
 
 -- == Logging ==================================================
--- This logging mostly only exists for debugging - eventually I
--- will change it to create a log at a certain absolute path and
--- provide actual info
+-- TODO: make the log file be created in the same directory as the executable / script
 local f = io.open("log.txt", "w+")
 f:close()
 
@@ -102,13 +112,16 @@ end
 term.size = term.get_size()
 
 function term.reset()
+	-- can't use ansi.write here because the draw loop has stopped
+
 	-- reset the cursor to a solid block
 	io.write(string.char(27).."[2 q")
 
-	-- move to the last line of the terminal
-	local size = term.size
-	ansi.write(tostring(size.h+1)..";0H")
-	io.write(string.char(27).."["..tostring(size.h+1)..";0H")
+	-- move to the first line
+	io.write(string.char(27).."[H")
+	
+	-- clear the screen
+	io.write(string.char(27).."[2J")
 end
 
 -- == File management ==========================================
@@ -148,6 +161,7 @@ function file.write(path, str)
 end
 
 -- == Mode management ==========================================
+-- TODO: implement file finder (using mode 4)
 -- 1 = edit
 -- 2 = nav
 -- 3 = command line
@@ -164,6 +178,9 @@ buff.offset = 0
 
 -- saved tracker
 buff.saved = true
+
+-- the copy buffer
+buff.copy = ""
 
 function buff.count_lines()
 	return #buff.str + 1
@@ -207,6 +224,7 @@ function cmd.draw()
 end
 
 -- parses the command in cmd.str and runs it, if it is valid
+-- if it is not valid, then it simply does nothing
 function cmd.parse()
 	table.insert(cmd.history, cmd.str)
 	local first_word, second_word = string.match(cmd.str, "^(%w+) (.+)")
@@ -222,6 +240,7 @@ function cmd.parse()
 		end
 	elseif first_word == "open" then
 		if not second_word then
+			-- FIXME: why is this logging here?
 			log.write("open command recieved")
 		else
 			core.load_file(second_word)
@@ -402,6 +421,51 @@ end
 function core.redo()
 end
 
+function core.cut_line()
+	buff.copy = buff.str[buff.y].."\n"
+	table.remove(buff.str, buff.y)
+	buff.saved = false
+end
+
+function core.copy_line()
+	buff.copy = buff.str[buff.y].."\n"
+end
+
+-- NOTE: This implementation is for future contigency, as most copying within the editor is single lines. However, when we implement selection, there can be multiple lines in buff.copy. It's simply easier to implement support for multiple lines now rather than revise later
+-- for now, this implementation (the first if branch in the while loop) is completely hypothetical and cannot be tested until selection is implemented
+function core.paste()
+	-- if there is a newline, get the index, chop the string at the newline, then insert each into buff
+	while buff.copy:find("\n") ~= nil do
+		local newline = buff.copy:find("\n")
+
+		-- newline is now a number with the index of the newline
+		if newline < #buff.copy then
+			local pre = buff.copy:sub(1, newline)
+			local post = buff.copy:sub(newline+1)
+
+			table.insert(buff.str, buff.y, pre)
+			table.insert(buff.str, buff.y+1, post)
+
+			buff.y = buff.y + 1
+			buff.x = 1
+
+			buff.copy = post
+		else
+			table.insert(buff.str, buff.y+1, buff.copy)
+			buff.y = buff.y + 1
+			buff.x = 1
+			break
+		end
+	end
+
+	-- if there is not a newline, append the line at the cursor's position
+	if buff.copy:find("\n") == nil then
+		log.write("no newline")
+
+		buff.str[line] = buff.str[line]:sub(1, buff.x-1)..buff.copy..buff.str[line]:sub(buff.x)
+	end
+end
+
 -- == Input ====================================================
 local function edit_input()
 	os.execute("stty raw")
@@ -423,6 +487,7 @@ local function edit_input()
 		io.read(1)
 		is_esc = true
 	-- backspace
+	-- BUG: the app crashes when backspace is pressed on the first character of the buffer
 	elseif char_code == 8 or char_code == 127 then
 		local line = buff.y
 		if buff.x > 1 then
@@ -462,6 +527,12 @@ local function edit_input()
 			cmd.x = 6
 		elseif char == "j" then
 			core.enter_nav()
+		elseif char == "x" then
+			core.cut_line()
+		elseif char == "c" then
+			core.copy_line()
+		elseif char == "v" then
+			core.paste()
 		-- enter
 		elseif char == "m" then
 			local line = buff.y
@@ -629,6 +700,7 @@ local function cmd_input()
 	elseif is_esc then
 		local code = io.read(1)
 
+		-- BUG: command history input is bugged (see README)
 		-- up
 		if code == "A" then
 			if cmd.history_index > 1 then
@@ -685,6 +757,7 @@ end
 local function main()
 	local running = true
 
+	-- enable proper cursor
 	io.write(string.char(27).."[6 q]")
 
 	if arg[1] then
