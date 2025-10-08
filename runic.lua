@@ -16,7 +16,6 @@
 -- TODO: full word jumping (ctrl+arrows for edit mode, b/e for nav mode)
 
 -- BUG: pressing the escape key crashes the editor
--- BUG: opening a nonexistent file and closing while empty (or without saving) does not remove the file when the editor is closed - this might be fixed by stopping the editor from creating a new file, and just use the buffer instead?
 
 -- =================== TODO section end ========================
 
@@ -34,12 +33,12 @@ local core = {}
 draw.buff = {}
 
 -- == Logging ==================================================
--- TODO: make the log file be created in the same directory as the executable / script
-local f = io.open("log.txt", "w+")
+local fpath = os.getenv("HOME").."/.runic-log"
+local f = io.open(fpath, "w+")
 f:close()
 
 function log.write(msg)
-	f = io.open("log.txt", "a")
+	f = io.open(fpath, "a")
 	f:write(msg.."\n")
 	f:close()
 end
@@ -468,8 +467,6 @@ function core.paste()
 
 	-- if there is not a newline, append the line at the cursor's position
 	if buff.copy:find("\n") == nil then
-		log.write("no newline")
-
 		buff.str[line] = buff.str[line]:sub(1, buff.x-1)..buff.copy..buff.str[line]:sub(buff.x)
 	end
 end
