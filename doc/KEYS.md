@@ -11,6 +11,13 @@ Basically a Runic cheat sheet
 | ctrl+q       | Quit (no saving confirmation!) |
 | ctrl+l       | Goto line (Open command mode with "line " in buffer) |
 | ctrl+j       | Enter nav mode                 |
+| ctrl+c       | Copy line                      |
+| ctrl+x       | Cut line                       |
+| ctrl+v       | Paste line                     |
+| ctrl+f       | Find (Open command mode with "find " in buffer) |
+| ctrl+n       | Find next (jump to next instance of last searched string) |
+| ctrl+b       | Find previous (find next, but opposite) |
+| ctrl+h       | Replace (Open command mode with "replace " in buffer) |
 | arrow keys   | Move cursor                    |
 
 ## Nav Mode
@@ -22,6 +29,13 @@ Basically a Runic cheat sheet
 | ctrl+p       | Open file browser mode         |
 | ctrl+q, q    | Quit (no saving confirmation!  |
 | ctrl+l       | Goto line (Open command mode with "line " in buffer) |
+| ctrl+c       | Copy line                      |
+| ctrl+x       | Cut line                       |
+| ctrl+v       | Paste line                     |
+| ctrl+f       | Find (Open command mode with "find " in buffer) |
+| ctrl+n       | Find next (jump to next instance of last searched string) |
+| ctrl+b       | Find previous (find next, but opposite) |
+| ctrl+h       | Replace (Open command mode with "replace " in buffer) |
 | ctrl+j       | Exit nav mode                  |
 | j            | Cursor down                    |
 | k            | Cursor up                      |

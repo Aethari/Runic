@@ -9,14 +9,14 @@
 -- will probably need maintanenced at some point).
 
 -- Current objective / fix / feature:
--- 	implementing copy/paste (speficially pasting - line 433, core.paste() function)
 
 -- TODO: implement horizontal scrolling or line wrapping for long lines
 -- TODO: find a way to listen for the escape key - fixes below bug
--- TODO: find / replace
 -- TODO: highlighting / selection (and fix any copying / pasting that comes with it)
+-- TODO: full word jumping (ctrl+arrows for edit mode, b/e for nav mode)
 
 -- BUG: pressing the escape key crashes the editor
+-- BUG: opening a nonexistent file and closing while empty (or without saving) does not remove the file when the editor is closed - this might be fixed by stopping the editor from creating a new file, and just use the buffer instead?
 
 -- =================== TODO section end ========================
 
@@ -166,6 +166,7 @@ end
 -- 2 = nav
 -- 3 = command line
 -- 4 = file browser
+-- 5 = find
 local mode = 1
 
 -- == Buffer management ========================================
@@ -181,6 +182,9 @@ buff.saved = true
 
 -- the copy buffer
 buff.copy = ""
+
+-- the currently searched word
+buff.find = ""
 
 function buff.count_lines()
 	return #buff.str + 1
@@ -239,10 +243,7 @@ function cmd.parse()
 			core.save_file()
 		end
 	elseif first_word == "open" then
-		if not second_word then
-			-- FIXME: why is this logging here?
-			log.write("open command recieved")
-		else
+		if second_word ~= nil then
 			core.load_file(second_word)
 		end
 	elseif first_word == "mode" then
@@ -263,6 +264,14 @@ function cmd.parse()
 			end
 
 			buff.y = line
+		end
+	elseif first_word == "find" then
+		if second_word then
+			core.find(second_word)
+		end
+	elseif first_word == "replace" then
+		if second_word then
+			core.replace(second_word)
 		end
 	end
 
@@ -343,7 +352,6 @@ function core.buff_cursor_up()
 		end
 		if buff.x < 1 then buff.x = 1 end
 
-		local size = term.size
 		if buff.y < buff.offset + 4 then
 			buff.offset = buff.offset - 1
 		end
@@ -435,7 +443,7 @@ end
 -- for now, this implementation (the first if branch in the while loop) is completely hypothetical and cannot be tested until selection is implemented
 function core.paste()
 	-- if there is a newline, get the index, chop the string at the newline, then insert each into buff
-	while buff.copy:find("\n") ~= nil do
+	repeat
 		local newline = buff.copy:find("\n")
 
 		-- newline is now a number with the index of the newline
@@ -456,13 +464,99 @@ function core.paste()
 			buff.x = 1
 			break
 		end
-	end
+	until newline == nil
 
 	-- if there is not a newline, append the line at the cursor's position
 	if buff.copy:find("\n") == nil then
 		log.write("no newline")
 
 		buff.str[line] = buff.str[line]:sub(1, buff.x-1)..buff.copy..buff.str[line]:sub(buff.x)
+	end
+end
+
+-- Calling this multiple times on the same string jumps to the next instance of that string
+function core.find(str)
+	buff.find = str
+
+	for i = buff.y+1, #buff.str do
+		local pos = string.lower(buff.str[i]):find(string.lower(str))
+
+		if pos ~= nil then
+			local size = term.size
+			if i - buff.offset >= size.h - 4 then
+				buff.offset = i - 4
+			end
+
+			buff.y = i
+			buff.x = pos
+			break
+		end
+	end
+end
+
+function core.find_prev()
+	for i = buff.y - 1, 1, -1 do
+		local pos = string.lower(buff.str[i]):find(string.lower(buff.find))
+
+		if pos ~= nil then
+			local size = term.size
+			if i < buff.offset + 4 then
+				buff.offset = i - size.h + 5
+			end
+
+			buff.y = i
+			buff.x = pos
+			break
+		end
+	end
+end
+
+-- NOTE: we will use the syntax "<find>/<replace> to determine what to replace, and what to replace it with
+-- NOTE: if there is a "/a" on the end (optional), it will replace all of them
+function core.replace(str)
+	local find, replace = str:match("^(.-)#(.+)")
+
+	if find == nil or replace == nil then
+		return
+	end
+
+	buff.find = find
+
+	local replace_all = false
+	if replace:sub(-2) == "#a" then
+		replace = replace:sub(1, -3)
+		replace_all = true
+	end
+
+	-- create a case insensitive pattern of `find`
+	local find_insens = ""
+	for i=1, #find do
+		local char = find:sub(i,i)
+		find_insens = find_insens.."["..char:upper()..char:lower().."]"
+	end
+
+	if not replace_all then
+		for i = buff.y, #buff.str do
+			if buff.str[i]:find(find_insens) then
+				buff.str[i] = string.gsub(buff.str[i], find_insens, replace)
+
+				local size = term.size
+
+				-- FIXME: this hasn't really been tested fully
+				-- FIXME: at the moment, this only sets the y, not the x like core.find does
+				if i - buff.offset >= size.h - 4 then
+					buff.offset = i - 4
+				end
+
+				buff.y = i
+
+				break
+			end
+		end
+	else
+		for i,v in pairs(buff.str) do
+			buff.str[i] = string.gsub(v, find_insens, replace)
+		end
 	end
 end
 
@@ -487,13 +581,12 @@ local function edit_input()
 		io.read(1)
 		is_esc = true
 	-- backspace
-	-- BUG: the app crashes when backspace is pressed on the first character of the buffer
 	elseif char_code == 8 or char_code == 127 then
 		local line = buff.y
 		if buff.x > 1 then
 			buff.str[line] = buff.str[line]:sub(1, buff.x-2)..buff.str[line]:sub(buff.x)
 			buff.x = buff.x - 1
-		else
+		elseif buff.y > 1 then
 			buff.x = #buff.str[line-1] + 1
 			buff.y = buff.y - 1
 
@@ -533,6 +626,18 @@ local function edit_input()
 			core.copy_line()
 		elseif char == "v" then
 			core.paste()
+		elseif char == "f" then
+			core.open_cmd()
+			cmd.str = "find "
+			cmd.x = 6
+		elseif char == "n" then
+			core.find(buff.find)
+		elseif char == "b" then
+			core.find_prev()
+		elseif char == "h" then
+			core.open_cmd()
+			cmd.str = "replace "
+			cmd.x = 9
 		-- enter
 		elseif char == "m" then
 			local line = buff.y
@@ -644,6 +749,24 @@ local function nav_input()
 			core.open_cmd()
 			cmd.str = "line "
 			cmd.x = 6
+		elseif char == "c" then
+			core.copy_line()
+		elseif char == "x" then
+			core.cut_line()
+		elseif char == "v" then
+			core.paste()
+		elseif char == "f" then
+			core.open_cmd()
+			cmd.str = "find "
+			cmd.x = 6
+		elseif char == "n" then
+			core.find(buff.find)
+		elseif char == "b" then
+			core.find_prev()
+		elseif char == "h" then
+			core.open_cmd()
+			cmd.str = "replace "
+			cmd.x = 9
 		elseif char == "j" then
 			core.exit_nav()
 		end
