@@ -18,6 +18,8 @@ Basically a Runic cheat sheet
 | ctrl+n       | Find next (jump to next instance of last searched string) |
 | ctrl+b       | Find previous (find next, but opposite) |
 | ctrl+h       | Replace (Open command mode with "replace " in buffer) |
+| ctrl+z       | Undo                           |
+| ctrl+y       | Redo                           |
 | arrow keys   | Move cursor                    |
 
 ## Nav Mode
@@ -36,6 +38,8 @@ Basically a Runic cheat sheet
 | ctrl+n       | Find next (jump to next instance of last searched string) |
 | ctrl+b       | Find previous (find next, but opposite) |
 | ctrl+h       | Replace (Open command mode with "replace " in buffer) |
+| ctrl+z       | Undo                           |
+| ctrl+y       | Redo                           |
 | ctrl+j       | Exit nav mode                  |
 | j            | Cursor down                    |
 | k            | Cursor up                      |

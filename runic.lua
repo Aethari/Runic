@@ -9,13 +9,16 @@
 -- will probably need maintanenced at some point).
 
 -- Current objective / fix / feature:
+-- 	implement undo/redo (core.undo)
 
 -- TODO: implement horizontal scrolling or line wrapping for long lines
--- TODO: find a way to listen for the escape key - fixes below bug
+-- TODO: find a way to listen for the escape key (fixes below bug)
 -- TODO: highlighting / selection (and fix any copying / pasting that comes with it)
--- TODO: full word jumping (ctrl+arrows for edit mode, b/e for nav mode)
+-- TODO: word jumping (ctrl+arrows for edit/cmd mode, b/e for nav mode)
+-- TODO: undo/redo
 
 -- BUG: pressing the escape key crashes the editor
+-- BUG: backspace messes with the line when a tab character is present
 
 -- =================== TODO section end ========================
 
@@ -165,7 +168,6 @@ end
 -- 2 = nav
 -- 3 = command line
 -- 4 = file browser
--- 5 = find
 local mode = 1
 
 -- == Buffer management ========================================
@@ -184,6 +186,10 @@ buff.copy = ""
 
 -- the currently searched word
 buff.find = ""
+
+-- a list of changes that were recently made and the index we are currently at
+buff.change_history = {}
+buff.change_index = 1
 
 function buff.count_lines()
 	return #buff.str + 1
@@ -207,8 +213,16 @@ function buff.draw()
 		end
 	end
 
+	local tab_count = 0
+	local line = buff.str[buff.y]
+	for i=1, buff.x - 1 do
+		if line:sub(i,i) == "\t" then
+			tab_count = tab_count + 1
+		end
+	end
+
 	-- add values to offset the various lines used by the UI
-	ansi.write(tostring(buff.y - buff.offset + 1)..";"..tostring(buff.x+4).."H")
+	ansi.write(tostring(buff.y - buff.offset + 1)..";"..tostring(buff.x+4+(tab_count*3)).."H")
 end
 
 -- == Command buffer management ================================
@@ -254,6 +268,7 @@ function cmd.parse()
 		elseif second_word == "browser" or second_word == "b" then
 			--mode = 4
 		end
+	-- BUG: this command (line) goes past the end of the file when the value is too high
 	elseif first_word == "line" then
 		if second_word and tonumber(second_word) then
 			local line = tonumber(second_word)
@@ -336,6 +351,9 @@ function core.load_file(path)
 	else
 		buff.str = file.read(path)
 	end
+
+	buff.y = 1
+	buff.x = 1
 end
 
 -- when calculating cursor position, gsub the tabs for spaces
@@ -378,7 +396,6 @@ end
 
 function core.buff_cursor_right()
 	local line = buff.str[buff.y]
-	if line then line = line:gsub("\t", "    ") end
 
 	if buff.x < #line+1 then
 		buff.x = buff.x + 1
@@ -390,7 +407,6 @@ end
 
 function core.buff_cursor_left()
 	local line = buff.str[buff.y]
-	if line then line = line:gsub("\t", "    ") end
 
 	if buff.x > 1 then
 		buff.x = buff.x - 1
@@ -422,10 +438,18 @@ function core.close_cmd()
 	io.write(string.char(27).."[6 q")
 end
 
+-- NOTE: we will use a nested table system, with buff.change_history at the root. each child will represent one change and have three values:
+--	- line (which line was changed)
+--	- old (what the line was before changing)
+--	- new (what the line is now)
 function core.undo()
+	if #buff.change_history > 0 then
+	end
 end
 
 function core.redo()
+	if #buff.change_history > 0 then
+	end
 end
 
 function core.cut_line()
@@ -569,8 +593,14 @@ local function edit_input()
 	local is_ctrl = false
 	local is_esc = false
 
+	-- tab character
+	if char_code == 9 then
+		local line = buff.y
+		buff.str[line] = buff.str[line]:sub(1, buff.x-1).."\t"..buff.str[line]:sub(buff.x)
+		buff.x = buff.x + 1
+		buff.saved = false
 	-- control characters
-	if char_code >= 1 and char_code < 27 then
+	elseif char_code >= 1 and char_code < 27 then
 		-- convert to relevant character
 		char = string.char(char_code + 64)
 		is_ctrl = true
@@ -635,6 +665,10 @@ local function edit_input()
 			core.open_cmd()
 			cmd.str = "replace "
 			cmd.x = 9
+		elseif char == "z" then
+			core.undo()
+		elseif char == "y" then
+			core.redo()
 		-- enter
 		elseif char == "m" then
 			local line = buff.y
@@ -764,6 +798,10 @@ local function nav_input()
 			core.open_cmd()
 			cmd.str = "replace "
 			cmd.x = 9
+		elseif char == "z" then
+			core.undo()
+		elseif char == "y" then
+			core.redo()
 		elseif char == "j" then
 			core.exit_nav()
 		end
