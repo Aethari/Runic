@@ -9,7 +9,6 @@
 -- will probably need maintanenced at some point).
 
 -- Current objective / fix / feature:
--- 	implement undo/redo (core.undo)
 
 -- TODO: implement horizontal scrolling or line wrapping for long lines
 -- TODO: find a way to listen for the escape key (fixes below bug)
@@ -17,10 +16,11 @@
 -- TODO: word jumping (ctrl+arrows for edit/cmd mode, b/e for nav mode)
 -- TODO: undo/redo
 
--- BUG: pressing the escape key crashes the editor
--- BUG: backspace messes with the line when a tab character is present
-
--- =================== TODO section end ========================
+-- BUG: pressing the escape key from any mode crashes the editor
+-- BUG: for line numbers above 99 (3 digits or more) only the first two digits of the number are down
+-- BUG: opening an empty file that was NOT created with `runic` crashes the editor (i.e. files made with "touch"
+-- BUG: cutting a line does not reset the cursor x position to the end of the (new) current line
+-- BUG: the editor crashes when a directory is attempted to be opened
 
 -- == Tables ===================================================
 local log = {}
@@ -187,7 +187,7 @@ buff.copy = ""
 -- the currently searched word
 buff.find = ""
 
--- a list of changes that were recently made and the index we are currently at
+-- a list of changes that were recently made to the buffer and the index in the change stack we are currently at
 buff.change_history = {}
 buff.change_index = 1
 
@@ -208,13 +208,24 @@ function buff.draw()
 		if line then
 			line = line:gsub("\t", "    ")
 			ansi.write(tostring(i+1)..";0H")
-			table.insert(draw.buff, string.format("%3d", index))
+
+			if index == buff.y then
+				-- draw in grey
+				ansi.write("30m")
+
+				ansi.write("47m")
+				table.insert(draw.buff, string.format("%3d", index))
+				ansi.write("0m")
+			else
+				table.insert(draw.buff, string.format("%3d", index))
+			end
+
 			table.insert(draw.buff, " "..line)
 		end
 	end
 
-	local tab_count = 0
 	local line = buff.str[buff.y]
+	local tab_count = 0
 	for i=1, buff.x - 1 do
 		if line:sub(i,i) == "\t" then
 			tab_count = tab_count + 1
@@ -223,6 +234,17 @@ function buff.draw()
 
 	-- add values to offset the various lines used by the UI
 	ansi.write(tostring(buff.y - buff.offset + 1)..";"..tostring(buff.x+4+(tab_count*3)).."H")
+end
+
+-- copies the contents of buff.str to out
+function buff.dup()
+	local out = {}
+
+	for i,v in pairs(buff.str) do
+		out[i] = buff.str[i]
+	end
+
+	return out
 end
 
 -- == Command buffer management ================================
@@ -269,6 +291,7 @@ function cmd.parse()
 			--mode = 4
 		end
 	-- BUG: this command (line) goes past the end of the file when the value is too high
+	-- BUG: this command (line) makes the UI and a line of the buffer draw on the command line
 	elseif first_word == "line" then
 		if second_word and tonumber(second_word) then
 			local line = tonumber(second_word)
@@ -278,6 +301,7 @@ function cmd.parse()
 			end
 
 			buff.y = line
+			buff.x = 1
 		end
 	elseif first_word == "find" then
 		if second_word then
@@ -342,6 +366,7 @@ function core.save_file()
 	buff.saved = true
 end
 
+-- TODO: make this (core.load_file) reset buff.change_history
 function core.load_file(path)
 	buff.filename = path
 
@@ -354,6 +379,7 @@ function core.load_file(path)
 
 	buff.y = 1
 	buff.x = 1
+	buff.offset = 0
 end
 
 -- when calculating cursor position, gsub the tabs for spaces
@@ -362,7 +388,6 @@ function core.buff_cursor_up()
 		buff.y = buff.y - 1
 
 		local line = buff.str[buff.y]
-		if line then line = line:gsub("\t", "    ") end
 
 		if buff.x > #line then
 			buff.x = #line + 1
@@ -385,7 +410,6 @@ function core.buff_cursor_down()
 		end
 
 		local line = buff.str[buff.y]
-		if line then line = line:gsub("\t", "    ") end
 
 		if buff.x > #line then
 			buff.x = #line + 1
@@ -412,7 +436,7 @@ function core.buff_cursor_left()
 		buff.x = buff.x - 1
 	elseif buff.y > 1 then
 		buff.y = buff.y - 1
-		buff.x = #buff.str[buff.y]:gsub("\t", "    ") + 1
+		buff.x = #buff.str[buff.y] + 1
 	end
 end
 
@@ -438,23 +462,50 @@ function core.close_cmd()
 	io.write(string.char(27).."[6 q")
 end
 
--- NOTE: we will use a nested table system, with buff.change_history at the root. each child will represent one change and have three values:
---	- line (which line was changed)
---	- old (what the line was before changing)
---	- new (what the line is now)
+-- FIXME: we are almost ready to actually implement undo/redo, but we need to figure out what happens
+-- FIXME:	when a change is made and we are not at the top of the change stack. we should probably just
+-- FIXME:	delete all entries above the current index and "restart" from the current one
 function core.undo()
-	if #buff.change_history > 0 then
+	-- move down (+1) in the change stack, restoring that "node"'s changes
+	if #buff.change_history > 0 and buff.change_index < #buff.change_history then
+		buff.change_index = buff.change_index + 1
+		buff.str = buff.change_history[buff.change_index]
+
+		if buff.y > #buff.str then
+			buff.y = #buff.str
+		end
+
+		buff.x = #buff.str[buff.y]+1
 	end
 end
 
 function core.redo()
-	if #buff.change_history > 0 then
+	-- move up (-1) in the change stack, restoring that "node"'s changes
+	-- make sure to move the cursor to the line where the changes were made (store x position where changes were made in nodes so we can restore that too?)
+	if #buff.change_history > 0 and buff.change_index > 1 then
+		buff.change_index = buff.change_index - 1
+		buff.str = buff.change_history[buff.change_index]
+
+		if buff.y > #buff.str then
+			buff.y = #buff.str
+		end
+
+		buff.x = #buff.str[buff.y]+1
+
 	end
 end
 
 function core.cut_line()
+	local before = buff.dup()
+
 	buff.copy = buff.str[buff.y].."\n"
 	table.remove(buff.str, buff.y)
+
+	if buff.y > #buff.str then
+		buff.y = #buff.str
+	end
+
+	table.insert(buff.change_history, 1, before)
 	buff.saved = false
 end
 
@@ -466,6 +517,8 @@ end
 -- for now, this implementation (the first if branch in the while loop) is completely hypothetical and cannot be tested until selection is implemented
 function core.paste()
 	-- if there is a newline, get the index, chop the string at the newline, then insert each into buff
+	local before = buff.dup()
+
 	repeat
 		local newline = buff.copy:find("\n")
 
@@ -479,19 +532,26 @@ function core.paste()
 
 			buff.y = buff.y + 1
 			buff.x = 1
-
-			buff.copy = post
+			buff.saved = false
 		else
 			table.insert(buff.str, buff.y+1, buff.copy)
 			buff.y = buff.y + 1
 			buff.x = 1
+			buff.saved = false
+
+			table.insert(buff.change_history, 1, before)
 			break
 		end
 	until newline == nil
 
 	-- if there is not a newline, append the line at the cursor's position
 	if buff.copy:find("\n") == nil then
+		local before = buff.dup()
+
 		buff.str[line] = buff.str[line]:sub(1, buff.x-1)..buff.copy..buff.str[line]:sub(buff.x)
+
+		table.insert(buff.change_history, 1, before)
+		buff.saved = false
 	end
 end
 
@@ -559,6 +619,7 @@ function core.replace(str)
 	if not replace_all then
 		for i = buff.y, #buff.str do
 			if buff.str[i]:find(find_insens) then
+				local before = buff.dup()
 				buff.str[i] = string.gsub(buff.str[i], find_insens, replace)
 
 				local size = term.size
@@ -571,13 +632,21 @@ function core.replace(str)
 
 				buff.y = i
 
+				table.insert(buff.change_history, 1, before)
+				buff.saved = false
+
 				break
 			end
 		end
 	else
+		local before = buff.dup()
+
 		for i,v in pairs(buff.str) do
 			buff.str[i] = string.gsub(v, find_insens, replace)
+			buff.saved = false
 		end
+
+		table.insert(buff.change_history, 1, before)
 	end
 end
 
@@ -596,8 +665,12 @@ local function edit_input()
 	-- tab character
 	if char_code == 9 then
 		local line = buff.y
+		local before = buff.dup()
+
 		buff.str[line] = buff.str[line]:sub(1, buff.x-1).."\t"..buff.str[line]:sub(buff.x)
 		buff.x = buff.x + 1
+
+		table.insert(buff.change_history, 1, before)
 		buff.saved = false
 	-- control characters
 	elseif char_code >= 1 and char_code < 27 then
@@ -611,20 +684,34 @@ local function edit_input()
 	elseif char_code == 8 or char_code == 127 then
 		local line = buff.y
 		if buff.x > 1 then
+			local before = buff.dup()
 			buff.str[line] = buff.str[line]:sub(1, buff.x-2)..buff.str[line]:sub(buff.x)
+
 			buff.x = buff.x - 1
+
+			table.insert(buff.change_history, 1, before)
+			buff.saved = false
 		elseif buff.y > 1 then
 			buff.x = #buff.str[line-1] + 1
 			buff.y = buff.y - 1
 
+			local before = buff.dup()
+
 			buff.str[line-1] = buff.str[line-1]..buff.str[line]
 			table.remove(buff.str, line)
+
+			table.insert(buff.change_history, 1, before)
+			buff.saved = false
 		end
 	-- insert characters
 	else
 		local line = buff.y
+		local before = buff.dup()
+
 		buff.str[line] = buff.str[line]:sub(1, buff.x-1)..char..buff.str[line]:sub(buff.x)
 		buff.x = buff.x + 1
+
+		table.insert(buff.change_history, 1, before)
 		buff.saved = false
 	end
 
@@ -673,6 +760,8 @@ local function edit_input()
 		elseif char == "m" then
 			local line = buff.y
 
+			local str_before = buff.dup()
+
 			local before = buff.str[line]:sub(1, buff.x-1)
 			local new = buff.str[line]:sub(buff.x)
 
@@ -681,6 +770,9 @@ local function edit_input()
 
 			buff.y = buff.y + 1
 			buff.x = 1
+
+			table.insert(buff.change_history, 1, str_before)
+			buff.saved = false
 		end
 	elseif is_esc then
 		local code = io.read(1)
@@ -702,7 +794,7 @@ local function edit_input()
 			buff.x = 1
 		-- end
 		elseif code == "4" then
-			buff.x = #buff.str[buff.y]:gsub("\t", "    ") + 1
+			buff.x = #buff.str[buff.y] + 1
 
 			-- if the line is empty, it sets buff.x to 0, this fixes it
 			if buff.x < 1 then buff.x = 1 end
@@ -747,7 +839,7 @@ local function nav_input()
 		buff.x = 1
 	-- i
 	elseif char_code == 105 then
-		buff.x = #buff.str[buff.y]:gsub("\t", "    ") + 1
+		buff.x = #buff.str[buff.y] + 1
 	-- a
 	elseif char_code == 97 then
 		core.exit_nav()
@@ -917,6 +1009,9 @@ local function main()
 
 	-- enable proper cursor
 	io.write(string.char(27).."[6 q]")
+
+	-- disable line wrapping
+	io.write(string.char(27).."[?7l")
 
 	if arg[1] then
 		if not file.exists(arg[1]) then

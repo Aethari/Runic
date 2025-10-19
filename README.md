@@ -1,7 +1,3 @@
-**Disclaimer:** Runic is only in a semi-usable state at the
-moment, so if you are cloning now don't expect it to be
-super functional.
-
 # Runic - A minimalist text editor written in pure Lua
 See the [doc](doc/) directory for some (very simple)
 documentation
