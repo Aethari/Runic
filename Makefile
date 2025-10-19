@@ -15,25 +15,20 @@ install:
 
 	sudo cp runic.lua /usr/bin/runic.lua
 	sudo cp scripts/runic.sh /usr/bin/runic
+	sudo cp scripts/runic-update.sh /usr/bin/runic-update
 
 	sudo chmod +x /usr/bin/runic
-
-	@echo
-
-install-user:
-	@echo
-	@echo "Please provide the superuser password"
-	@sudo echo "Installing to \"\""
-	@echo
+	sudo chmod +x /usr/bin/runic-update
 
 	@echo
 
 uninstall:
 	@echo
-	@echo "Removing /usr/bin/runic and /usr/bin/runic.lua"
+	@echo "Removing /usr/bin/runic, /usr/bin/runic-update, and /usr/bin/runic.lua"
 	@echo "Please provide the superuser password"
 
 	sudo rm -f /usr/bin/runic
+	sudo rm -f /usr/bin/runic-update
 	sudo rm -f /usr/bin/runic.lua
 
 	@echo

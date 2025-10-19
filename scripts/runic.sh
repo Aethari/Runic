@@ -12,10 +12,19 @@ fi
 # Check if ./runic.lua exists
 RUNIC="./runic.lua"
 
-if [ -z "${RUNIC}" ]; then
-	echo "Error: runic.lua not found"
-	echo "\tPlease reinstall Runic, or manually copy runic.lua to the same directory as this script"
-	exit 1
+if [ ! -f "${RUNIC}" ]; then
+	echo "Downloading runic.lua..."
+
+	RUNIC_UPDATE="./runic-update"
+
+	if [ ! -f "${RUNIC-UPDATE}" ]; then
+		echo "Error: runic-update not found"
+		echo "\tPlease reinstall Runic"
+		exit 1
+	fi
+
+	./runic-update
 fi
 
+# Start the editor
 $LUA "$RUNIC" "$@"
