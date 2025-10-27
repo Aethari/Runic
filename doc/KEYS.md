@@ -45,6 +45,8 @@ Basically a Runic cheat sheet
 | k            | Cursor up                      |
 | h            | Cursor left                    |
 | l            | Cursor right                   |
+| e            | Jump forwards 1 word           |
+| b            | Jump backwards 1 word          |
 | a            | Enter edit mode                |
 | u, home      | Goto beginning of current line |
 | i, end       | Goto end of current line       |

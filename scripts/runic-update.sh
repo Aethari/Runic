@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# The directory that this script is located in
 SCRIPT_PATH=$(dirname $(realpath $0))
 
 # Check if curl exists on the PATH

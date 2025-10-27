@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Check script path here
+SCRIPT_PATH=$(dirname $(realpath $0))
+
 # Check if Lua exists on the PATH
 LUA="$(which lua)"
 
@@ -9,13 +12,13 @@ if [ -z "${LUA}" ]; then
 	exit 1
 fi
 
-# Check if ./runic.lua exists
-RUNIC="./runic.lua"
+# Check if SCRIPT_PATH/runic.lua exists
+RUNIC="${SCRIPT_PATH}/runic.lua"
 
 if [ ! -f "${RUNIC}" ]; then
 	echo "Downloading runic.lua..."
 
-	RUNIC_UPDATE="./runic-update"
+	RUNIC_UPDATE="${SCRIPT_PATH}/runic-update"
 
 	if [ ! -f "${RUNIC-UPDATE}" ]; then
 		echo "Error: runic-update not found"
@@ -23,7 +26,7 @@ if [ ! -f "${RUNIC}" ]; then
 		exit 1
 	fi
 
-	./runic-update
+	$SCRIPT_PATH/runic-update
 fi
 
 # Start the editor

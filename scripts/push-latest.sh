@@ -4,3 +4,4 @@
 git checkout latest
 git reset --hard master
 git push --force origin latest
+git checkout master

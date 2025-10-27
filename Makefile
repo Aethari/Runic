@@ -1,11 +1,11 @@
 all: test
 
 test:
-	lua runic.lua runic.lua
+	lua runic.lua runic.lua 2> error.log
 
 read-log:
 	@chmod +x scripts/cat-log.sh
-	scripts/cat-log.sh
+	@scripts/cat-log.sh
 
 install:
 	@echo

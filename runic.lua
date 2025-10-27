@@ -13,14 +13,12 @@
 -- TODO: implement horizontal scrolling or line wrapping for long lines
 -- TODO: find a way to listen for the escape key (fixes below bug)
 -- TODO: highlighting / selection (and fix any copying / pasting that comes with it)
--- TODO: word jumping (ctrl+arrows for edit/cmd mode, b/e for nav mode)
--- TODO: undo/redo
+-- TODO: clean up unneccesary NOTE comments
 
 -- BUG: pressing the escape key from any mode crashes the editor
--- BUG: for line numbers above 99 (3 digits or more) only the first two digits of the number are down
--- BUG: opening an empty file that was NOT created with `runic` crashes the editor (i.e. files made with "touch"
--- BUG: cutting a line does not reset the cursor x position to the end of the (new) current line
--- BUG: the editor crashes when a directory is attempted to be opened
+-- BUG: the UI and a line of the buffer draw on the command line if the terminal is sized down vertically
+-- BUG: ruler line numbers above 999 take up one extra column of the buffer
+-- BUG: the delete key is still not working? (needs tested)
 
 -- == Tables ===================================================
 local log = {}
@@ -30,7 +28,9 @@ local file = {}
 local buff = {}
 local cmd = {}
 local draw = {}
-local core = {}
+
+-- kept core global as it is intended to be a "pseudo-api". this way, things like extentions can be created
+core = {}
 
 -- defined draw.buff up here to avoid errors
 draw.buff = {}
@@ -150,6 +150,12 @@ function file.read(path)
 		end
 
 		f:close()
+
+		-- empty file, such as those created by the `touch` command
+		if i == 1 then
+			out[1] = ""
+		end
+
 		return out
 	else
 		return {}
@@ -290,11 +296,13 @@ function cmd.parse()
 		elseif second_word == "browser" or second_word == "b" then
 			--mode = 4
 		end
-	-- BUG: this command (line) goes past the end of the file when the value is too high
-	-- BUG: this command (line) makes the UI and a line of the buffer draw on the command line
 	elseif first_word == "line" then
 		if second_word and tonumber(second_word) then
 			local line = tonumber(second_word)
+
+			if line > #buff.str then
+				line = #buff.str
+			end
 
 			if line ~= buff.y + buff.offset then
 				buff.offset = line - 4
@@ -366,13 +374,18 @@ function core.save_file()
 	buff.saved = true
 end
 
--- TODO: make this (core.load_file) reset buff.change_history
 function core.load_file(path)
 	buff.filename = path
 
 	if not file.exists(path) then
 		buff.str = {}
 		table.insert(buff.str, "")
+	elseif file.exists(path.."/") then
+		-- FIXME: when the file finder / buffer is implemented, open the directory in the browser instead of throwing an error
+		term.reset()
+		log.write("Error: attempt to open a directory")
+		io.write("Error: attempt to open a directory\n")
+		os.exit(1)
 	else
 		buff.str = file.read(path)
 	end
@@ -380,9 +393,10 @@ function core.load_file(path)
 	buff.y = 1
 	buff.x = 1
 	buff.offset = 0
+	buff.change_history = {}
+	buff.change_index = 1
 end
 
--- when calculating cursor position, gsub the tabs for spaces
 function core.buff_cursor_up()
 	if buff.y > 1 then
 		buff.y = buff.y - 1
@@ -462,9 +476,7 @@ function core.close_cmd()
 	io.write(string.char(27).."[6 q")
 end
 
--- FIXME: we are almost ready to actually implement undo/redo, but we need to figure out what happens
--- FIXME:	when a change is made and we are not at the top of the change stack. we should probably just
--- FIXME:	delete all entries above the current index and "restart" from the current one
+-- FIXME: this does not work when a change is made and we are not at the top of the call stack (i.e. change after redo)
 function core.undo()
 	-- move down (+1) in the change stack, restoring that "node"'s changes
 	if #buff.change_history > 0 and buff.change_index < #buff.change_history then
@@ -503,6 +515,10 @@ function core.cut_line()
 
 	if buff.y > #buff.str then
 		buff.y = #buff.str
+	end
+
+	if buff.x > #buff.str[buff.y] then
+		buff.x = #buff.str[buff.y]+1
 	end
 
 	table.insert(buff.change_history, 1, before)
@@ -592,8 +608,6 @@ function core.find_prev()
 	end
 end
 
--- NOTE: we will use the syntax "<find>/<replace> to determine what to replace, and what to replace it with
--- NOTE: if there is a "/a" on the end (optional), it will replace all of them
 function core.replace(str)
 	local find, replace = str:match("^(.-)#(.+)")
 
@@ -620,17 +634,17 @@ function core.replace(str)
 		for i = buff.y, #buff.str do
 			if buff.str[i]:find(find_insens) then
 				local before = buff.dup()
+				local pos = buff.str[i]:find(find_insens)
 				buff.str[i] = string.gsub(buff.str[i], find_insens, replace)
 
 				local size = term.size
 
-				-- FIXME: this hasn't really been tested fully
-				-- FIXME: at the moment, this only sets the y, not the x like core.find does
 				if i - buff.offset >= size.h - 4 then
 					buff.offset = i - 4
 				end
 
 				buff.y = i
+				buff.x = pos
 
 				table.insert(buff.change_history, 1, before)
 				buff.saved = false
@@ -642,11 +656,71 @@ function core.replace(str)
 		local before = buff.dup()
 
 		for i,v in pairs(buff.str) do
+			local pos = buff.str[i]:find(find_insens)
 			buff.str[i] = string.gsub(v, find_insens, replace)
-			buff.saved = false
+
+			if pos then
+				buff.saved = false
+				buff.y = i
+				buff.x = pos
+
+				-- scroll the buffer
+				local size = term.size
+				if i - buff.offset >= size.h - 4 then
+					buff.offset = i - 4
+				end
+			end
 		end
 
 		table.insert(buff.change_history, 1, before)
+	end
+end
+
+function core.jump_forward()
+	-- find the next character that is NOT a word
+	local _, pos = buff.str[buff.y]:sub(buff.x):find("[%w-/]+")
+
+	-- if pos is nil then there is no more match for this line, jump to the next one
+	if pos == nil then
+		local _, pos2 = buff.str[buff.y+1]:find("[%w-/]+")
+
+		buff.y = buff.y + 1
+
+		if pos2 == nil then
+			-- move to beginning of line
+			buff.x = 1
+		else
+			-- don't really know why the +1 is neccessary, but it is, so I added it
+
+			buff.x = pos2 + 1
+		end
+	else
+		buff.x = pos + buff.x
+	end
+end
+
+-- BUG: this function (core.jump_back) always jumps to the previous line when the character before the cursor is a ,
+function core.jump_back()
+	-- find the previous character that is NOT a word
+	local pos = buff.str[buff.y]:sub(1, buff.x-1):match("()[%w-/]+$")
+
+	-- if pos is less than 1 (before the line) then we need to jump back to the previous line
+	if pos == nil or pos <= 1 then
+		if buff.y == 1 then
+			buff.x = 1
+		else
+			local pos2 = buff.str[buff.y-1]:match("()[%w-/]+$")
+
+			buff.y = buff.y - 1
+			if pos2 == nil then
+				-- move to end of line
+				buff.x = #buff.str[buff.y]+1
+			else
+				buff.x = pos2 - 1
+			end
+		end
+	else
+		buff.x = pos - 1
 	end
 end
 
@@ -834,6 +908,12 @@ local function nav_input()
 	-- l
 	elseif char_code == 108 then
 		core.buff_cursor_right()
+	-- e
+	elseif char_code == 101 then
+		core.jump_forward()
+	-- b
+	elseif char_code == 98 then
+		core.jump_back()
 	-- u
 	elseif char_code == 117 then
 		buff.x = 1
@@ -1014,15 +1094,7 @@ local function main()
 	io.write(string.char(27).."[?7l")
 
 	if arg[1] then
-		if not file.exists(arg[1]) then
-			buff.str = {}
-			table.insert(buff.str, "")
-			buff.filename = arg[1]
-		else
-			buff.str = file.read(arg[1])
-			buff.filename = arg[1]
-		end
-
+		core.load_file(arg[1])
 	else
 		buff.str = {""}
 		buff.filename = "New file"
